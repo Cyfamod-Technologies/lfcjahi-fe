@@ -349,16 +349,21 @@
   color: #4f667b;
 }
 
-.stickyColumnRight {
+.tableScroller {
   position: sticky;
-  right: 0;
-  background: #ffffff;
-  z-index: 2;
-  box-shadow: -10px 0 18px rgba(9, 42, 66, 0.08);
+  top: 0;
+  z-index: 4;
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 18px;
+  margin-bottom: 8px;
+  border-radius: 999px;
+  background: #edf4fa;
+  border: 1px solid #d7e5f0;
 }
 
-.stickyColumnHeader {
-  z-index: 3;
+.tableScrollerTrack {
+  height: 1px;
 }
 
 .activeTableRow {

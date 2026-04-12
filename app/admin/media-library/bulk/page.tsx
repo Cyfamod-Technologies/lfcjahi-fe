@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import styles from "../../admin-pages.module.css";
@@ -136,6 +136,10 @@ function buildAutoDescription(service: string, speaker: string, mediaDate: strin
 
 export default function AdminBulkMediaPage() {
   const router = useRouter();
+  const tableWrapRef = useRef<HTMLDivElement | null>(null);
+  const tableRef = useRef<HTMLTableElement | null>(null);
+  const topScrollerRef = useRef<HTMLDivElement | null>(null);
+  const scrollSyncSourceRef = useRef<"top" | "table" | null>(null);
 
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [speakers, setSpeakers] = useState<SpeakerItem[]>(loadSpeakers);
@@ -147,6 +151,8 @@ export default function AdminBulkMediaPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState("");
   const [status, setStatus] = useState("");
+  const [tableScrollWidth, setTableScrollWidth] = useState(0);
+  const [showTableScroller, setShowTableScroller] = useState(false);
 
   useEffect(() => {
     let isActive = true;
@@ -208,6 +214,33 @@ export default function AdminBulkMediaPage() {
   const speakerOptions = useMemo(() => getSpeakerNames(speakers), [speakers]);
   const serviceOptions = useMemo(() => SERVICE_OPTIONS, []);
   const audioCategorySelected = isAudioCategory(category);
+
+  useEffect(() => {
+    const tableWrap = tableWrapRef.current;
+    const table = tableRef.current;
+
+    if (!tableWrap || !table) {
+      return;
+    }
+
+    function syncScrollerMetrics() {
+      setTableScrollWidth(table.scrollWidth);
+      setShowTableScroller(table.scrollWidth > tableWrap.clientWidth + 1);
+    }
+
+    syncScrollerMetrics();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", syncScrollerMetrics);
+      return () => window.removeEventListener("resize", syncScrollerMetrics);
+    }
+
+    const observer = new ResizeObserver(syncScrollerMetrics);
+    observer.observe(tableWrap);
+    observer.observe(table);
+
+    return () => observer.disconnect();
+  }, [audioCategorySelected, rows]);
 
   async function handleThumbnailSelection(rowId: string, file: File | null) {
     if (!file) {
@@ -318,6 +351,40 @@ export default function AdminBulkMediaPage() {
       return hasMeaningfulRows ? [...current, ...nextRows] : nextRows;
     });
     setStatus(`${files.length} audio file(s) added as rows. Cross-check the details before saving.`);
+  }
+
+  function handleTopScrollerScroll() {
+    const topScroller = topScrollerRef.current;
+    const tableWrap = tableWrapRef.current;
+
+    if (!topScroller || !tableWrap) {
+      return;
+    }
+
+    if (scrollSyncSourceRef.current === "table") {
+      scrollSyncSourceRef.current = null;
+      return;
+    }
+
+    scrollSyncSourceRef.current = "top";
+    tableWrap.scrollLeft = topScroller.scrollLeft;
+  }
+
+  function handleTableWrapScroll() {
+    const topScroller = topScrollerRef.current;
+    const tableWrap = tableWrapRef.current;
+
+    if (!topScroller || !tableWrap) {
+      return;
+    }
+
+    if (scrollSyncSourceRef.current === "top") {
+      scrollSyncSourceRef.current = null;
+      return;
+    }
+
+    scrollSyncSourceRef.current = "table";
+    topScroller.scrollLeft = tableWrap.scrollLeft;
   }
 
   function addRow() {
@@ -619,8 +686,22 @@ export default function AdminBulkMediaPage() {
             </button>
           </div>
 
-          <div className={`${styles.formGridFull} ${styles.tableWrap}`}>
-            <table className={styles.table}>
+          {showTableScroller ? (
+            <div
+              ref={topScrollerRef}
+              className={`${styles.formGridFull} ${styles.tableScroller}`}
+              onScroll={handleTopScrollerScroll}
+            >
+              <div className={styles.tableScrollerTrack} style={{ width: `${tableScrollWidth}px` }} />
+            </div>
+          ) : null}
+
+          <div
+            ref={tableWrapRef}
+            className={`${styles.formGridFull} ${styles.tableWrap}`}
+            onScroll={handleTableWrapScroll}
+          >
+            <table ref={tableRef} className={styles.table}>
               <thead>
                 <tr>
                   {audioCategorySelected ? <th>Source</th> : null}
@@ -631,7 +712,7 @@ export default function AdminBulkMediaPage() {
                   <th>Date</th>
                   <th>Thumbnail</th>
                   <th>Description</th>
-                  <th className={`${styles.stickyColumnRight} ${styles.stickyColumnHeader}`}>Actions</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -771,7 +852,7 @@ export default function AdminBulkMediaPage() {
                         style={{ minWidth: 260, minHeight: 84 }}
                       />
                     </td>
-                    <td className={styles.stickyColumnRight}>
+                    <td>
                       <div className={styles.listActions}>
                         <button type="button" className={styles.buttonDanger} onClick={() => removeRow(row.id)}>
                           Remove
