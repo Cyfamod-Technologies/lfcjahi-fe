@@ -216,16 +216,23 @@ export default function AdminBulkMediaPage() {
   const audioCategorySelected = isAudioCategory(category);
 
   useEffect(() => {
-    const tableWrap = tableWrapRef.current;
-    const table = tableRef.current;
+    const initialTableWrap = tableWrapRef.current;
+    const initialTable = tableRef.current;
 
-    if (!tableWrap || !table) {
+    if (!initialTableWrap || !initialTable) {
       return;
     }
 
     function syncScrollerMetrics() {
-      setTableScrollWidth(table.scrollWidth);
-      setShowTableScroller(table.scrollWidth > tableWrap.clientWidth + 1);
+      const currentTableWrap = tableWrapRef.current;
+      const currentTable = tableRef.current;
+
+      if (!currentTableWrap || !currentTable) {
+        return;
+      }
+
+      setTableScrollWidth(currentTable.scrollWidth);
+      setShowTableScroller(currentTable.scrollWidth > currentTableWrap.clientWidth + 1);
     }
 
     syncScrollerMetrics();
@@ -236,8 +243,8 @@ export default function AdminBulkMediaPage() {
     }
 
     const observer = new ResizeObserver(syncScrollerMetrics);
-    observer.observe(tableWrap);
-    observer.observe(table);
+    observer.observe(initialTableWrap);
+    observer.observe(initialTable);
 
     return () => observer.disconnect();
   }, [audioCategorySelected, rows]);
