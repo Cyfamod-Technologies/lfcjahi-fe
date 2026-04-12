@@ -207,12 +207,29 @@ export default function AdminMediaLibraryPage() {
       .sort((a, b) => Number(b) - Number(a));
   }, [mediaItemsWithDate]);
 
+  const monthFilters = useMemo(() => {
+    return mediaItemsWithDate
+      .filter(({ item, year }) => {
+        const matchesCategory = filterCategory === "All" || item.category === filterCategory;
+        const matchesSpeaker = filterSpeaker === "All" || item.speaker === filterSpeaker;
+        const matchesYear = filterYear === "All" || year === filterYear;
+
+        return matchesCategory && matchesSpeaker && matchesYear;
+      })
+      .map((entry) => entry.month)
+      .filter(Boolean)
+      .filter((value, index, source) => source.indexOf(value) === index)
+      .sort((a, b) => Number(a) - Number(b));
+  }, [filterCategory, filterSpeaker, filterYear, mediaItemsWithDate]);
+
+  const effectiveMonthFilter = filterMonth === "All" || monthFilters.includes(filterMonth) ? filterMonth : "All";
+
   const filteredItems = useMemo(() => {
     const output = mediaItemsWithDate.filter(({ item, year, month }) => {
       const matchesCategory = filterCategory === "All" || item.category === filterCategory;
       const matchesSpeaker = filterSpeaker === "All" || item.speaker === filterSpeaker;
       const matchesYear = filterYear === "All" || year === filterYear;
-      const matchesMonth = filterMonth === "All" || month === filterMonth;
+      const matchesMonth = effectiveMonthFilter === "All" || month === effectiveMonthFilter;
 
       return matchesCategory && matchesSpeaker && matchesYear && matchesMonth;
     });
@@ -234,7 +251,7 @@ export default function AdminMediaLibraryPage() {
     });
 
     return output.map((entry) => entry.item);
-  }, [filterCategory, filterMonth, filterSpeaker, filterYear, mediaItemsWithDate, sortMode]);
+  }, [effectiveMonthFilter, filterCategory, filterSpeaker, filterYear, mediaItemsWithDate, sortMode]);
 
   async function handleDelete(item: MediaItem) {
     const confirmed = window.confirm(`Delete '${item.title}'?`);
@@ -368,11 +385,15 @@ export default function AdminMediaLibraryPage() {
 
           <div className={styles.field}>
             <label htmlFor="filterMonth">Month</label>
-            <select id="filterMonth" value={filterMonth} onChange={(event) => setFilterMonth(event.target.value)}>
+            <select
+              id="filterMonth"
+              value={effectiveMonthFilter}
+              onChange={(event) => setFilterMonth(event.target.value)}
+            >
               <option value="All">All Months</option>
-              {MONTH_OPTIONS.map((monthName, index) => (
-                <option key={monthName} value={String(index)}>
-                  {monthName}
+              {monthFilters.map((monthIndex) => (
+                <option key={monthIndex} value={monthIndex}>
+                  {MONTH_OPTIONS[Number(monthIndex)]}
                 </option>
               ))}
             </select>
@@ -406,6 +427,7 @@ export default function AdminMediaLibraryPage() {
                 <tr>
                   <th>No.</th>
                   <th>Title</th>
+                  <th>Service</th>
                   <th>Date</th>
                   <th>Post Image</th>
                   <th>Speaker</th>
@@ -420,6 +442,7 @@ export default function AdminMediaLibraryPage() {
                   <tr key={item.id}>
                     <td>{index + 1}</td>
                     <td>{item.title}</td>
+                    <td>{item.subcategory || "-"}</td>
                     <td>{formatTableDate(item)}</td>
                     <td>
                       {item.thumbnailUrl ? (
