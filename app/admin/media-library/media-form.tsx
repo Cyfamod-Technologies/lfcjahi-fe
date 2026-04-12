@@ -24,6 +24,7 @@ import {
   fetchMediaItemsApi,
   fetchSpeakersApi,
   hasApiBaseUrl,
+  isLikelyNetworkError,
   saveMediaItemApi,
 } from "../lib/admin-api";
 import { parseMediaMetadataFromFilename } from "../lib/media-filename";
@@ -475,7 +476,13 @@ export default function MediaForm({ mediaId }: MediaFormProps) {
       }
     } catch (error) {
       if (apiConfigured) {
-        setStatus(error instanceof Error ? error.message : "Audio upload failed. Please try again.");
+        setStatus(
+          isLikelyNetworkError(error)
+            ? "Connection dropped during upload. Your selected audio is still attached in the form. Restore the network and click save again."
+            : error instanceof Error
+              ? error.message
+              : "Audio upload failed. Please try again.",
+        );
         setIsSaving(false);
         return;
       }

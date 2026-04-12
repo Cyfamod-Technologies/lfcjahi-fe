@@ -25,6 +25,67 @@ type SortMode = "newest" | "oldest" | "speaker" | "category";
 
 type QueryStatus = "" | "created" | "updated" | "bulk-created";
 
+const MONTH_OPTIONS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+] as const;
+
+function parseItemDate(item: MediaItem): Date | null {
+  const candidate = item.mediaDate || item.createdAt;
+
+  if (!candidate) {
+    return null;
+  }
+
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(candidate) ? `${candidate}T00:00:00` : candidate;
+  const date = new Date(normalized);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getOrdinalSuffix(day: number): string {
+  const remainder = day % 100;
+
+  if (remainder >= 11 && remainder <= 13) {
+    return "th";
+  }
+
+  switch (day % 10) {
+    case 1:
+      return "st";
+    case 2:
+      return "nd";
+    case 3:
+      return "rd";
+    default:
+      return "th";
+  }
+}
+
+function formatTableDate(item: MediaItem): string {
+  const date = parseItemDate(item);
+
+  if (!date) {
+    return "-";
+  }
+
+  const day = date.getDate();
+  const month = date.toLocaleDateString("en-US", { month: "long" });
+  const year = date.getFullYear();
+
+  return `${day}${getOrdinalSuffix(day)} ${month} ${year}`;
+}
+
 function subscribeLocation(callback: () => void): () => void {
   if (typeof window === "undefined") {
     return () => {};
@@ -65,6 +126,8 @@ export default function AdminMediaLibraryPage() {
 
   const [filterCategory, setFilterCategory] = useState<"All" | MediaCategory>("All");
   const [filterSpeaker, setFilterSpeaker] = useState("All");
+  const [filterYear, setFilterYear] = useState("All");
+  const [filterMonth, setFilterMonth] = useState("All");
   const [sortMode, setSortMode] = useState<SortMode>("newest");
 
   useEffect(() => {
@@ -121,34 +184,57 @@ export default function AdminMediaLibraryPage() {
     return [...new Set([...configured, ...usedByMedia])].sort((a, b) => a.localeCompare(b));
   }, [categoryTree, mediaItems]);
 
+  const mediaItemsWithDate = useMemo(
+    () =>
+      mediaItems.map((item) => {
+        const date = parseItemDate(item);
+
+        return {
+          item,
+          timestamp: date?.getTime() ?? 0,
+          year: date ? String(date.getFullYear()) : "",
+          month: date ? String(date.getMonth()) : "",
+        };
+      }),
+    [mediaItems],
+  );
+
+  const yearFilters = useMemo(() => {
+    return mediaItemsWithDate
+      .map((entry) => entry.year)
+      .filter(Boolean)
+      .filter((value, index, source) => source.indexOf(value) === index)
+      .sort((a, b) => Number(b) - Number(a));
+  }, [mediaItemsWithDate]);
+
   const filteredItems = useMemo(() => {
-    const output = mediaItems.filter((item) => {
+    const output = mediaItemsWithDate.filter(({ item, year, month }) => {
       const matchesCategory = filterCategory === "All" || item.category === filterCategory;
       const matchesSpeaker = filterSpeaker === "All" || item.speaker === filterSpeaker;
-      return matchesCategory && matchesSpeaker;
+      const matchesYear = filterYear === "All" || year === filterYear;
+      const matchesMonth = filterMonth === "All" || month === filterMonth;
+
+      return matchesCategory && matchesSpeaker && matchesYear && matchesMonth;
     });
 
     output.sort((a, b) => {
-      const dateA = new Date(a.mediaDate || a.createdAt).getTime();
-      const dateB = new Date(b.mediaDate || b.createdAt).getTime();
-
       if (sortMode === "oldest") {
-        return dateA - dateB;
+        return a.timestamp - b.timestamp;
       }
 
       if (sortMode === "speaker") {
-        return a.speaker.localeCompare(b.speaker);
+        return a.item.speaker.localeCompare(b.item.speaker);
       }
 
       if (sortMode === "category") {
-        return a.category.localeCompare(b.category);
+        return a.item.category.localeCompare(b.item.category);
       }
 
-      return dateB - dateA;
+      return b.timestamp - a.timestamp;
     });
 
-    return output;
-  }, [filterCategory, filterSpeaker, mediaItems, sortMode]);
+    return output.map((entry) => entry.item);
+  }, [filterCategory, filterMonth, filterSpeaker, filterYear, mediaItemsWithDate, sortMode]);
 
   async function handleDelete(item: MediaItem) {
     const confirmed = window.confirm(`Delete '${item.title}'?`);
@@ -269,6 +355,30 @@ export default function AdminMediaLibraryPage() {
           </div>
 
           <div className={styles.field}>
+            <label htmlFor="filterYear">Year</label>
+            <select id="filterYear" value={filterYear} onChange={(event) => setFilterYear(event.target.value)}>
+              <option value="All">All Years</option>
+              {yearFilters.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className={styles.field}>
+            <label htmlFor="filterMonth">Month</label>
+            <select id="filterMonth" value={filterMonth} onChange={(event) => setFilterMonth(event.target.value)}>
+              <option value="All">All Months</option>
+              {MONTH_OPTIONS.map((monthName, index) => (
+                <option key={monthName} value={String(index)}>
+                  {monthName}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className={styles.field}>
             <label htmlFor="sortMode">Sort</label>
             <select id="sortMode" value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
               <option value="newest">Newest</option>
@@ -294,7 +404,9 @@ export default function AdminMediaLibraryPage() {
             <table className={styles.table}>
               <thead>
                 <tr>
+                  <th>No.</th>
                   <th>Title</th>
+                  <th>Date</th>
                   <th>Post Image</th>
                   <th>Speaker</th>
                   <th>Downloads</th>
@@ -304,9 +416,11 @@ export default function AdminMediaLibraryPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.map((item) => (
+                {filteredItems.map((item, index) => (
                   <tr key={item.id}>
+                    <td>{index + 1}</td>
                     <td>{item.title}</td>
+                    <td>{formatTableDate(item)}</td>
                     <td>
                       {item.thumbnailUrl ? (
                         <img

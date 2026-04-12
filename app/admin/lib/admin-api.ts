@@ -19,6 +19,14 @@ type ApiErrorPayload = {
 };
 
 const DEFAULT_API_BASE_URL = "https://b.bmp.com.ng";
+const NETWORK_ERROR_PATTERNS = [
+  "network error",
+  "failed to fetch",
+  "network request failed",
+  "load failed",
+  "upload was cancelled",
+  "the internet connection appears to be offline",
+] as const;
 
 function getApiBaseUrl(): string | null {
   const value = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
@@ -86,6 +94,17 @@ async function ensureSuccess(response: Response): Promise<boolean> {
 
 export function hasApiBaseUrl(): boolean {
   return Boolean(getApiBaseUrl());
+}
+
+export function isLikelyNetworkError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || "");
+  const normalized = message.trim().toLowerCase();
+
+  if (!normalized) {
+    return false;
+  }
+
+  return NETWORK_ERROR_PATTERNS.some((pattern) => normalized.includes(pattern));
 }
 
 export async function fetchCategoriesApi(): Promise<CategoryItem[] | null> {

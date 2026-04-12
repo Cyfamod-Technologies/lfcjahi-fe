@@ -26,6 +26,7 @@ import {
   fetchMediaItemsApi,
   fetchSpeakersApi,
   hasApiBaseUrl,
+  isLikelyNetworkError,
   saveMediaItemApi,
 } from "../../lib/admin-api";
 import { parseMediaMetadataFromFilename } from "../../lib/media-filename";
@@ -316,6 +317,8 @@ export default function AdminBulkMediaPage() {
     const createdItems: MediaItem[] = [];
     const failedRows: Array<{ rowId: string; message: string }> = [];
     const totalRows = activeRows.length;
+    let networkPauseMessage = "";
+    let rowsToKeep = new Set<string>();
 
     function updateBatchProgress(rowIndex: number, rowPercent: number) {
       const normalized = Math.max(0, Math.min(100, rowPercent));
@@ -441,6 +444,13 @@ export default function AdminBulkMediaPage() {
         if (!apiConfigured) {
           createdItems.push(localFallbackItem);
         } else {
+          if (isLikelyNetworkError(error)) {
+            rowsToKeep = new Set(activeRows.slice(index).map((entry) => entry.id));
+            networkPauseMessage = `${createdItems.length} item(s) added before the connection dropped while saving row ${index + 1}. The unsaved rows are still in the form. Restore the network and click save again to continue.`;
+            updateBatchProgress(index, 100);
+            break;
+          }
+
           failedRows.push({
             rowId: row.id,
             message: `Row ${index + 1}: ${error instanceof Error ? error.message : "save failed."}`,
@@ -455,6 +465,14 @@ export default function AdminBulkMediaPage() {
       const nextMediaItems = [...createdItems, ...mediaItems];
       setMediaItems(nextMediaItems);
       saveMediaItems(nextMediaItems);
+    }
+
+    if (networkPauseMessage) {
+      setRows((current) => current.filter((row) => !activeRows.some((entry) => entry.id === row.id) || rowsToKeep.has(row.id)));
+      setStatus(networkPauseMessage);
+      setProgressLabel(`Paused after saving ${createdItems.length} of ${totalRows} item(s)`);
+      setIsSaving(false);
+      return;
     }
 
     if (failedRows.length === 0) {
