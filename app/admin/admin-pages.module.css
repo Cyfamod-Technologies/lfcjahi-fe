@@ -349,6 +349,18 @@
   color: #4f667b;
 }
 
+.stickyColumnRight {
+  position: sticky;
+  right: 0;
+  background: #ffffff;
+  z-index: 2;
+  box-shadow: -10px 0 18px rgba(9, 42, 66, 0.08);
+}
+
+.stickyColumnHeader {
+  z-index: 3;
+}
+
 .activeTableRow {
   background: #edf5fc;
 }

@@ -631,7 +631,7 @@ export default function AdminBulkMediaPage() {
                   <th>Date</th>
                   <th>Thumbnail</th>
                   <th>Description</th>
-                  <th>Actions</th>
+                  <th className={`${styles.stickyColumnRight} ${styles.stickyColumnHeader}`}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -771,7 +771,7 @@ export default function AdminBulkMediaPage() {
                         style={{ minWidth: 260, minHeight: 84 }}
                       />
                     </td>
-                    <td>
+                    <td className={styles.stickyColumnRight}>
                       <div className={styles.listActions}>
                         <button type="button" className={styles.buttonDanger} onClick={() => removeRow(row.id)}>
                           Remove
