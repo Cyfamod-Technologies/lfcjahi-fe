@@ -63,6 +63,19 @@ function createEmptyRow(): BulkMediaRow {
   };
 }
 
+function rowHasContent(row: BulkMediaRow): boolean {
+  return [
+    row.speaker,
+    row.service,
+    row.title,
+    row.description,
+    row.mediaDate,
+    row.audioLink,
+    row.audioFile?.name || "",
+    row.thumbnailFile?.name || "",
+  ].some((value) => String(value || "").trim());
+}
+
 function isAudioCategory(category: string): boolean {
   return category.trim().toLowerCase() === "audio";
 }
@@ -194,6 +207,7 @@ export default function AdminBulkMediaPage() {
 
   const speakerOptions = useMemo(() => getSpeakerNames(speakers), [speakers]);
   const serviceOptions = useMemo(() => SERVICE_OPTIONS, []);
+  const audioCategorySelected = isAudioCategory(category);
 
   async function handleThumbnailSelection(rowId: string, file: File | null) {
     if (!file) {
@@ -269,6 +283,43 @@ export default function AdminBulkMediaPage() {
     updateRow(row.id, patch);
   }
 
+  function buildRowFromAudioFile(file: File): BulkMediaRow {
+    const parsed = parseMediaMetadataFromFilename(file.name, speakerOptions);
+
+    return {
+      id: createId("bulk-media"),
+      speaker: parsed.speaker,
+      service: parsed.service,
+      title: parsed.title,
+      description:
+        parsed.title || parsed.speaker || parsed.service || parsed.mediaDate
+          ? buildAutoDescription(parsed.service, parsed.speaker, parsed.mediaDate)
+          : "",
+      mediaDate: parsed.mediaDate,
+      thumbnailFile: null,
+      thumbnailPreviewUrl: "",
+      audioSourceMode: "file",
+      audioLink: "",
+      audioFile: file,
+    };
+  }
+
+  function handleBulkAudioSelection(fileList: FileList | null) {
+    const files = Array.from(fileList || []);
+
+    if (files.length === 0) {
+      return;
+    }
+
+    const nextRows = files.map((file) => buildRowFromAudioFile(file));
+
+    setRows((current) => {
+      const hasMeaningfulRows = current.some((row) => rowHasContent(row));
+      return hasMeaningfulRows ? [...current, ...nextRows] : nextRows;
+    });
+    setStatus(`${files.length} audio file(s) added as rows. Cross-check the details before saving.`);
+  }
+
   function addRow() {
     setRows((current) => [...current, createEmptyRow()]);
   }
@@ -298,11 +349,7 @@ export default function AdminBulkMediaPage() {
       return;
     }
 
-    const activeRows = rows.filter((row) =>
-      [row.title, row.description, row.mediaDate, row.audioLink, row.audioFile?.name || ""].some((value) =>
-        String(value || "").trim(),
-      ),
-    );
+    const activeRows = rows.filter((row) => rowHasContent(row));
 
     if (activeRows.length === 0) {
       setStatus("Add at least one media row.");
@@ -535,6 +582,31 @@ export default function AdminBulkMediaPage() {
             </select>
           </div>
 
+          {audioCategorySelected ? (
+            <div className={`${styles.uploadCard} ${styles.formGridFull}`}>
+              <div className={styles.uploadHeader}>
+                <h3 className={styles.uploadTitle}>Add Multiple Audio Files</h3>
+                <p className={styles.uploadSubtext}>
+                  Select many audio files at once and the system will create one review row per file.
+                </p>
+              </div>
+              <input
+                id="bulk-audio-multi"
+                className={styles.hiddenFileInput}
+                type="file"
+                accept="audio/*"
+                multiple
+                onChange={(event) => {
+                  handleBulkAudioSelection(event.target.files);
+                  event.target.value = "";
+                }}
+              />
+              <label htmlFor="bulk-audio-multi" className={styles.fileTrigger}>
+                Choose Multiple Audio Files
+              </label>
+            </div>
+          ) : null}
+
           <div className={`${styles.inlineActions} ${styles.formGridFull}`} style={{ justifyContent: "space-between" }}>
             <div>
               <h3 className={styles.panelTitle} style={{ fontSize: 18 }}>Item Rows</h3>
@@ -551,8 +623,8 @@ export default function AdminBulkMediaPage() {
             <table className={styles.table}>
               <thead>
                 <tr>
-                  {isAudioCategory(category) ? <th>Source</th> : null}
-                  {isAudioCategory(category) ? <th>Audio Link / File</th> : null}
+                  {audioCategorySelected ? <th>Source</th> : null}
+                  {audioCategorySelected ? <th>Audio Link / File</th> : null}
                   <th>Speaker</th>
                   <th>Service</th>
                   <th>Title</th>
@@ -565,7 +637,7 @@ export default function AdminBulkMediaPage() {
               <tbody>
                 {rows.map((row, index) => (
                   <tr key={row.id}>
-                    {isAudioCategory(category) ? (
+                    {audioCategorySelected ? (
                       <td>
                         <div className={styles.toggleGroup}>
                           <button
@@ -589,7 +661,7 @@ export default function AdminBulkMediaPage() {
                         </div>
                       </td>
                     ) : null}
-                    {isAudioCategory(category) ? (
+                    {audioCategorySelected ? (
                       <td>
                         {row.audioSourceMode === "link" ? (
                           <input
