@@ -25,6 +25,7 @@ import {
   fetchSpeakersApi,
   hasApiBaseUrl,
   isLikelyNetworkError,
+  isLikelyUploadTransportError,
   saveMediaItemApi,
 } from "../lib/admin-api";
 import { parseMediaMetadataFromFilename } from "../lib/media-filename";
@@ -479,6 +480,8 @@ export default function MediaForm({ mediaId }: MediaFormProps) {
         setStatus(
           isLikelyNetworkError(error)
             ? "Connection dropped during upload. Your selected audio is still attached in the form. Restore the network and click save again."
+            : isLikelyUploadTransportError(error)
+              ? "The upload stopped before the server returned a response. This may be a timeout, upload limit, proxy issue, or server problem. Your selected audio is still attached in the form. Fix the issue and click save again."
             : error instanceof Error
               ? error.message
               : "Audio upload failed. Please try again.",

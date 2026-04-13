@@ -23,9 +23,13 @@ const NETWORK_ERROR_PATTERNS = [
   "network error",
   "failed to fetch",
   "network request failed",
-  "load failed",
-  "upload was cancelled",
+  "internet connection dropped during upload",
   "the internet connection appears to be offline",
+] as const;
+const TRANSPORT_ERROR_PATTERNS = [
+  "upload request failed before the server returned a response",
+  "invalid response from server",
+  "upload was cancelled",
 ] as const;
 
 function getApiBaseUrl(): string | null {
@@ -105,6 +109,17 @@ export function isLikelyNetworkError(error: unknown): boolean {
   }
 
   return NETWORK_ERROR_PATTERNS.some((pattern) => normalized.includes(pattern));
+}
+
+export function isLikelyUploadTransportError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || "");
+  const normalized = message.trim().toLowerCase();
+
+  if (!normalized) {
+    return false;
+  }
+
+  return TRANSPORT_ERROR_PATTERNS.some((pattern) => normalized.includes(pattern));
 }
 
 export async function fetchCategoriesApi(): Promise<CategoryItem[] | null> {
@@ -395,7 +410,16 @@ export async function saveMediaItemApi(
         }
       });
 
-      xhr.addEventListener("error", () => reject(new Error("Network error during upload.")));
+      xhr.addEventListener("error", () => {
+        const isOffline = typeof navigator !== "undefined" && navigator.onLine === false;
+        reject(
+          new Error(
+            isOffline
+              ? "Internet connection dropped during upload."
+              : "Upload request failed before the server returned a response.",
+          ),
+        );
+      });
       xhr.addEventListener("abort", () => reject(new Error("Upload was cancelled.")));
 
       xhr.open("POST", targetUrl);

@@ -27,6 +27,7 @@ import {
   fetchSpeakersApi,
   hasApiBaseUrl,
   isLikelyNetworkError,
+  isLikelyUploadTransportError,
   saveMediaItemApi,
 } from "../../lib/admin-api";
 import { parseMediaMetadataFromFilename } from "../../lib/media-filename";
@@ -438,7 +439,7 @@ export default function AdminBulkMediaPage() {
     const createdItems: MediaItem[] = [];
     const failedRows: Array<{ rowId: string; message: string }> = [];
     const totalRows = activeRows.length;
-    let networkPauseMessage = "";
+    let uploadPauseMessage = "";
     let rowsToKeep = new Set<string>();
 
     function updateBatchProgress(rowIndex: number, rowPercent: number) {
@@ -567,7 +568,14 @@ export default function AdminBulkMediaPage() {
         } else {
           if (isLikelyNetworkError(error)) {
             rowsToKeep = new Set(activeRows.slice(index).map((entry) => entry.id));
-            networkPauseMessage = `${createdItems.length} item(s) added before the connection dropped while saving row ${index + 1}. The unsaved rows are still in the form. Restore the network and click save again to continue.`;
+            uploadPauseMessage = `${createdItems.length} item(s) added before the connection dropped while saving row ${index + 1}. The unsaved rows are still in the form. Restore the network and click save again to continue.`;
+            updateBatchProgress(index, 100);
+            break;
+          }
+
+          if (isLikelyUploadTransportError(error)) {
+            rowsToKeep = new Set(activeRows.slice(index).map((entry) => entry.id));
+            uploadPauseMessage = `${createdItems.length} item(s) added before the upload stopped while saving row ${index + 1}. The server did not return a complete response. This may be a timeout, upload limit, proxy issue, or server problem. The unsaved rows are still in the form. Fix the issue and click save again to continue.`;
             updateBatchProgress(index, 100);
             break;
           }
@@ -588,9 +596,9 @@ export default function AdminBulkMediaPage() {
       saveMediaItems(nextMediaItems);
     }
 
-    if (networkPauseMessage) {
+    if (uploadPauseMessage) {
       setRows((current) => current.filter((row) => !activeRows.some((entry) => entry.id === row.id) || rowsToKeep.has(row.id)));
-      setStatus(networkPauseMessage);
+      setStatus(uploadPauseMessage);
       setProgressLabel(`Paused after saving ${createdItems.length} of ${totalRows} item(s)`);
       setIsSaving(false);
       return;
