@@ -320,6 +320,79 @@ type SaveMediaInput = {
 
 export type UploadProgressCallback = (percent: number) => void;
 
+const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per chunk
+const MAX_CHUNK_RETRIES = 3;
+
+async function uploadAudioInChunks(
+  file: File,
+  onProgress: (pct: number) => void,
+): Promise<string> {
+  const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  const ext = (file.name.split(".").pop() ?? "mp3").toLowerCase();
+  const chunkUrl = buildApiUrl("/api/admin/upload/chunk")!;
+  const finalizeUrl = buildApiUrl("/api/admin/upload/finalize")!;
+
+  for (let i = 0; i < totalChunks; i++) {
+    const blob = file.slice(i * CHUNK_SIZE, Math.min((i + 1) * CHUNK_SIZE, file.size));
+    let succeeded = false;
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt < MAX_CHUNK_RETRIES; attempt++) {
+      try {
+        const form = new FormData();
+        form.append("upload_id", uploadId);
+        form.append("chunk_index", String(i));
+        form.append("total_chunks", String(totalChunks));
+        form.append("chunk", blob, `chunk-${i}`);
+
+        const res = await fetch(chunkUrl, {
+          method: "POST",
+          headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
+          body: form,
+        });
+
+        if (!res.ok) {
+          const p = (await res.json().catch(() => null)) as { message?: string } | null;
+          throw new Error(p?.message ?? `Chunk ${i} failed (HTTP ${res.status})`);
+        }
+
+        succeeded = true;
+        onProgress(Math.round(((i + 1) / totalChunks) * 90));
+        break;
+      } catch (err) {
+        lastError = err;
+        if (attempt < MAX_CHUNK_RETRIES - 1) {
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
+    }
+
+    if (!succeeded) throw lastError;
+  }
+
+  const form = new FormData();
+  form.append("upload_id", uploadId);
+  form.append("total_chunks", String(totalChunks));
+  form.append("original_name", file.name);
+  form.append("extension", ext);
+
+  const res = await fetch(finalizeUrl, {
+    method: "POST",
+    headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
+    body: form,
+  });
+
+  const payload = (await res.json().catch(() => null)) as { data?: { url?: string }; message?: string } | null;
+
+  if (!res.ok || !payload?.data?.url) {
+    throw new Error(payload?.message ?? "Failed to finalize upload.");
+  }
+
+  onProgress(95);
+  return payload.data.url;
+}
+
 export async function saveMediaItemApi(
   input: SaveMediaInput,
   id?: string,
@@ -332,14 +405,36 @@ export async function saveMediaItemApi(
     return null;
   }
 
+  // Step 1: upload audio in chunks (0–95%), then submit metadata (95–100%).
+  // This keeps each individual request small so slow/flaky networks don't
+  // drop the whole thing, and failed chunks retry without re-uploading the rest.
+  let resolvedMediaUrl = input.mediaUrl.trim();
+  let audioFileForForm: File | null = input.audioFile;
+
+  if (input.audioFile) {
+    resolvedMediaUrl = await uploadAudioInChunks(
+      input.audioFile,
+      (pct) => onProgress?.(pct),
+    );
+    audioFileForForm = null; // already stored; we'll pass the URL instead
+  }
+
+  // Step 2: build the metadata form (thumbnail file may still be attached).
   const formData = new FormData();
-  const trimmedMediaUrl = input.mediaUrl.trim();
+  const trimmedMediaUrl = resolvedMediaUrl;
   const trimmedThumbnailUrl = input.thumbnailUrl.trim();
   const trimmedMediaDate = input.mediaDate.trim();
-  const mediaSourceType = input.mediaSourceType === "link" || input.mediaSourceType === "file"
-    ? input.mediaSourceType
-    : "";
-  const shouldSendMediaUrl = !(mediaSourceType === "file" && input.audioFile);
+
+  // When audio was chunked-uploaded, the effective source type is always "file".
+  const mediaSourceType =
+    audioFileForForm === null && input.audioFile
+      ? "file"
+      : input.mediaSourceType === "link" || input.mediaSourceType === "file"
+        ? input.mediaSourceType
+        : "";
+
+  // Don't send media_url when the file is being uploaded in the same request.
+  const shouldSendMediaUrl = !(mediaSourceType === "file" && audioFileForForm);
 
   formData.append("title", input.title);
   formData.append("description", input.description);
@@ -347,40 +442,19 @@ export async function saveMediaItemApi(
   formData.append("subcategory", input.subcategory);
   formData.append("speaker", input.speaker);
 
-  if (trimmedMediaDate) {
-    formData.append("media_date", trimmedMediaDate);
-  }
-
-  if (shouldSendMediaUrl && trimmedMediaUrl) {
-    formData.append("media_url", trimmedMediaUrl);
-  }
-
-  if (mediaSourceType) {
-    formData.append("media_source_type", mediaSourceType);
-  }
-
-  if (trimmedThumbnailUrl) {
-    formData.append("thumbnail_url", trimmedThumbnailUrl);
-  }
-
+  if (trimmedMediaDate) formData.append("media_date", trimmedMediaDate);
+  if (shouldSendMediaUrl && trimmedMediaUrl) formData.append("media_url", trimmedMediaUrl);
+  if (mediaSourceType) formData.append("media_source_type", mediaSourceType);
+  if (trimmedThumbnailUrl) formData.append("thumbnail_url", trimmedThumbnailUrl);
   formData.append("is_published", input.isPublished ? "1" : "0");
+  if (input.thumbnailFile) formData.append("thumbnail_file", input.thumbnailFile);
+  if (audioFileForForm) formData.append("audio_file", audioFileForForm);
 
-  if (input.thumbnailFile) {
-    formData.append("thumbnail_file", input.thumbnailFile);
-  }
-
-  if (input.audioFile) {
-    formData.append("audio_file", input.audioFile);
-  }
-
-  // When files are attached and a progress callback is provided, use XHR
-  // so we can report upload progress to the UI.
-  const hasFiles = Boolean(input.audioFile || input.thumbnailFile);
+  // Use XHR only when a thumbnail file is still being sent (for progress 95–100%).
+  const hasFiles = Boolean(audioFileForForm || input.thumbnailFile);
 
   if (hasFiles && onProgress) {
-    if (id) {
-      formData.append("_method", "PUT");
-    }
+    if (id) formData.append("_method", "PUT");
     const targetUrl = id ? (updateUrl as string) : createUrl;
 
     return new Promise<MediaItem>((resolve, reject) => {
@@ -388,8 +462,9 @@ export async function saveMediaItemApi(
 
       xhr.upload.addEventListener("progress", (event) => {
         if (event.lengthComputable) {
-          const percent = Math.round((event.loaded / event.total) * 100);
-          onProgress(percent);
+          // Scale thumbnail upload to the 95–100% window.
+          const pct = Math.round(95 + (event.loaded / event.total) * 5);
+          onProgress(pct);
         }
       });
 
@@ -429,30 +504,16 @@ export async function saveMediaItemApi(
     });
   }
 
-  // Fallback to fetch when there are no files or no progress callback
-  let response: Response;
+  // No binary files left — submit metadata with a plain fetch.
+  if (id) formData.append("_method", "PUT");
 
-  if (id) {
-    formData.append("_method", "PUT");
-    response = await fetch(updateUrl as string, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "X-Requested-With": "XMLHttpRequest",
-      },
-      body: formData,
-    });
-  } else {
-    response = await fetch(createUrl, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "X-Requested-With": "XMLHttpRequest",
-      },
-      body: formData,
-    });
-  }
+  const response = await fetch(id ? (updateUrl as string) : createUrl, {
+    method: "POST",
+    headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
+    body: formData,
+  });
 
+  onProgress?.(100);
   return parseEnvelope<MediaItem>(response);
 }
 
