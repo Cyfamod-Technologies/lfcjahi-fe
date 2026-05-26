@@ -5,30 +5,35 @@ import { useEffect, useMemo, useState } from "react";
 import AdminShell from "../components/admin-shell";
 import styles from "../admin-pages.module.css";
 import { loadEvents, loadMediaItems } from "../lib/admin-store";
-import { fetchEventsApi, fetchMediaItemsApi } from "../lib/admin-api";
+import { fetchEventsApi, fetchMediaItemsApi, fetchStorageStatsApi } from "../lib/admin-api";
+
+function formatGb(bytes: number): string {
+  return (bytes / 1024 ** 3).toFixed(2) + " GB";
+}
 
 export default function AdminDashboardPage() {
   const [mediaItems, setMediaItems] = useState(loadMediaItems);
   const [events, setEvents] = useState(loadEvents);
+  const [audioSizeBytes, setAudioSizeBytes] = useState<number | null>(null);
 
   useEffect(() => {
     let isActive = true;
 
     async function hydrateFromApi() {
       try {
-        const [apiMedia, apiEvents] = await Promise.all([fetchMediaItemsApi(), fetchEventsApi()]);
+        const [apiMedia, apiEvents, storageStats] = await Promise.all([
+          fetchMediaItemsApi(),
+          fetchEventsApi(),
+          fetchStorageStatsApi(),
+        ]);
 
         if (!isActive) {
           return;
         }
 
-        if (apiMedia) {
-          setMediaItems(apiMedia);
-        }
-
-        if (apiEvents) {
-          setEvents(apiEvents);
-        }
+        if (apiMedia) setMediaItems(apiMedia);
+        if (apiEvents) setEvents(apiEvents);
+        if (storageStats) setAudioSizeBytes(storageStats.audioSizeBytes);
       } catch {
         // keep local fallback state
       }
@@ -79,6 +84,12 @@ export default function AdminDashboardPage() {
         <article className={styles.statCard}>
           <p className={styles.statLabel}>Events</p>
           <h3 className={styles.statValue}>{stats.events}</h3>
+        </article>
+        <article className={styles.statCard}>
+          <p className={styles.statLabel}>Audio Storage</p>
+          <h3 className={styles.statValue}>
+            {audioSizeBytes === null ? "—" : formatGb(audioSizeBytes)}
+          </h3>
         </article>
       </section>
 

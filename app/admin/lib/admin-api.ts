@@ -292,6 +292,13 @@ export async function deleteSpeakerApi(id: string): Promise<boolean> {
   return ensureSuccess(response);
 }
 
+export async function fetchStorageStatsApi(): Promise<{ audioSizeBytes: number; audioFileCount: number } | null> {
+  const url = buildApiUrl("/api/admin/media/storage-stats");
+  if (!url) return null;
+  const response = await fetch(url);
+  return parseEnvelope(response);
+}
+
 export async function fetchMediaItemsApi(): Promise<MediaItem[] | null> {
   const url = buildApiUrl("/api/admin/media");
 
