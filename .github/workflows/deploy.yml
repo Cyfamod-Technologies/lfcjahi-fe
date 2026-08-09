@@ -1280,3 +1280,4 @@ jobs:
             echo "- Commit: \`${GITHUB_SHA}\`"
             echo "- Status: \`Successfully deployed\`"
           } >> "$GITHUB_STEP_SUMMARY"
+           
