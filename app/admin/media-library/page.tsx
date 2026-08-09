@@ -118,6 +118,8 @@ export default function AdminMediaLibraryPage() {
   const [mediaItems, setMediaItems] = useState(loadMediaItems);
   const [categoryTree, setCategoryTree] = useState(loadCategoryTree);
   const [actionStatus, setActionStatus] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const queryStatus = useSyncExternalStore(
     subscribeLocation,
     getQueryStatusClientSnapshot,
@@ -253,6 +255,103 @@ export default function AdminMediaLibraryPage() {
     return output.map((entry) => entry.item);
   }, [effectiveMonthFilter, filterCategory, filterSpeaker, filterYear, mediaItemsWithDate, sortMode]);
 
+  const selectedItems = useMemo(
+    () => mediaItems.filter((item) => selectedIds.has(item.id)),
+    [mediaItems, selectedIds],
+  );
+  const allFilteredSelected =
+    filteredItems.length > 0 && filteredItems.every((item) => selectedIds.has(item.id));
+  const someFilteredSelected = filteredItems.some((item) => selectedIds.has(item.id));
+
+  function handleItemSelection(id: string, checked: boolean) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+
+      return next;
+    });
+  }
+
+  function handleSelectAllFiltered(checked: boolean) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+
+      filteredItems.forEach((item) => {
+        if (checked) {
+          next.add(item.id);
+        } else {
+          next.delete(item.id);
+        }
+      });
+
+      return next;
+    });
+  }
+
+  async function handleBulkDelete() {
+    if (selectedItems.length === 0 || isBulkDeleting) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete ${selectedItems.length} selected media item${selectedItems.length === 1 ? "" : "s"}? This cannot be undone.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsBulkDeleting(true);
+    setActionStatus(`Deleting ${selectedItems.length} selected media items...`);
+
+    const deletedIds = new Set<string>();
+    const failedIds = new Set<string>();
+    const batchSize = 5;
+
+    for (let index = 0; index < selectedItems.length; index += batchSize) {
+      const batch = selectedItems.slice(index, index + batchSize);
+      const results = await Promise.allSettled(
+        batch.map(async (item) => ({ item, deleted: await deleteMediaItemApi(item.id) })),
+      );
+
+      results.forEach((result, resultIndex) => {
+        const item = batch[resultIndex];
+
+        if (result.status === "fulfilled" && result.value.deleted) {
+          deletedIds.add(item.id);
+        } else {
+          failedIds.add(item.id);
+        }
+      });
+    }
+
+    if (deletedIds.size > 0) {
+      const nextItems = mediaItems.filter((item) => !deletedIds.has(item.id));
+      setMediaItems(nextItems);
+      saveMediaItems(nextItems);
+    }
+
+    setSelectedIds(failedIds);
+    setIsBulkDeleting(false);
+
+    if (failedIds.size === 0) {
+      setActionStatus(
+        `Deleted ${deletedIds.size} media item${deletedIds.size === 1 ? "" : "s"}.`,
+      );
+    } else if (deletedIds.size === 0) {
+      setActionStatus(`Could not delete the ${failedIds.size} selected media items. Please try again.`);
+    } else {
+      setActionStatus(
+        `Deleted ${deletedIds.size} media item${deletedIds.size === 1 ? "" : "s"}. ${failedIds.size} failed and remain selected.`,
+      );
+    }
+  }
+
   async function handleDelete(item: MediaItem) {
     const confirmed = window.confirm(`Delete '${item.title}'?`);
     if (!confirmed) {
@@ -262,6 +361,11 @@ export default function AdminMediaLibraryPage() {
     const nextItems = mediaItems.filter((entry) => entry.id !== item.id);
     setMediaItems(nextItems);
     saveMediaItems(nextItems);
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      next.delete(item.id);
+      return next;
+    });
 
     try {
       await deleteMediaItemApi(item.id);
@@ -417,7 +521,36 @@ export default function AdminMediaLibraryPage() {
       </section>
 
       <section className={styles.panel}>
-        <h2 className={styles.panelTitle}>Media Items</h2>
+        <div className={styles.bulkDeleteToolbar}>
+          <div>
+            <h2 className={styles.panelTitle}>Media Items</h2>
+            <p className={styles.selectionSummary}>
+              {selectedItems.length === 0
+                ? "Select media items below to delete several at once."
+                : `${selectedItems.length} media item${selectedItems.length === 1 ? "" : "s"} selected.`}
+            </p>
+          </div>
+          <div className={styles.inlineActions}>
+            {selectedItems.length > 0 ? (
+              <button
+                className={styles.buttonSecondary}
+                type="button"
+                disabled={isBulkDeleting}
+                onClick={() => setSelectedIds(new Set())}
+              >
+                Clear Selection
+              </button>
+            ) : null}
+            <button
+              className={styles.buttonDanger}
+              type="button"
+              disabled={selectedItems.length === 0 || isBulkDeleting}
+              onClick={() => void handleBulkDelete()}
+            >
+              {isBulkDeleting ? "Deleting..." : `Delete Selected (${selectedItems.length})`}
+            </button>
+          </div>
+        </div>
         {filteredItems.length === 0 ? (
           <p className={styles.emptyState}>No media matches your filters yet.</p>
         ) : (
@@ -425,6 +558,21 @@ export default function AdminMediaLibraryPage() {
             <table className={styles.table}>
               <thead>
                 <tr>
+                  <th>
+                    <input
+                      className={styles.selectionCheckbox}
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      aria-label="Select all filtered media items"
+                      disabled={isBulkDeleting}
+                      ref={(input) => {
+                        if (input) {
+                          input.indeterminate = someFilteredSelected && !allFilteredSelected;
+                        }
+                      }}
+                      onChange={(event) => handleSelectAllFiltered(event.target.checked)}
+                    />
+                  </th>
                   <th>No.</th>
                   <th>Title</th>
                   <th>Service</th>
@@ -440,6 +588,16 @@ export default function AdminMediaLibraryPage() {
               <tbody>
                 {filteredItems.map((item, index) => (
                   <tr key={item.id}>
+                    <td>
+                      <input
+                        className={styles.selectionCheckbox}
+                        type="checkbox"
+                        checked={selectedIds.has(item.id)}
+                        aria-label={`Select ${item.title}`}
+                        disabled={isBulkDeleting}
+                        onChange={(event) => handleItemSelection(item.id, event.target.checked)}
+                      />
+                    </td>
                     <td>{index + 1}</td>
                     <td>{item.title}</td>
                     <td>{item.subcategory || "-"}</td>
