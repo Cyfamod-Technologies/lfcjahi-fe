@@ -18,7 +18,7 @@ type ApiErrorPayload = {
   errors?: Record<string, string[]>;
 };
 
-const DEFAULT_API_BASE_URL = "https://b.bmp.com.ng";
+const DEFAULT_API_BASE_URL = "https://api.lfcjahi.com";
 const NETWORK_ERROR_PATTERNS = [
   "network error",
   "failed to fetch",
@@ -33,7 +33,9 @@ const TRANSPORT_ERROR_PATTERNS = [
 ] as const;
 
 function getApiBaseUrl(): string | null {
-  const value = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+  const value =
+    process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_BACKEND_URL?.trim();
 
   if (!value) {
     return DEFAULT_API_BASE_URL;
